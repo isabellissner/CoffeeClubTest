@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Coffee Club · An Atlas of Tastings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Crimson+Pro:ital,wght@0,300;0,400;1,300;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<style>
+  :root {
+    --cream: #f8f0dc; --parchment: #f0e4c4;
+    --brown-deep: #2a1810; --brown: #4a2e1e;
+    --brown-mid: #7a3a1f; --brown-light: #a05c2e;
+    --amber: #c8923a; --ocean: #cfe3e6;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    background: var(--cream); color: var(--brown-deep);
+    font-family: 'Crimson Pro', Georgia, serif;
+    min-height: 100vh; overflow-x: hidden;
+  }
+  body::before {
+    content:''; position:fixed; inset:0; pointer-events:none; z-index:999; opacity:0.03;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Header */
+  header { text-align:center; padding:52px 24px 28px; }
+  .eyebrow { font-size:11px; letter-spacing:.38em; text-transform:uppercase; color:var(--brown-mid); margin-bottom:12px; opacity:0; animation:fadeUp .7s ease .1s forwards; }
+  h1 { font-family:'EB Garamond',serif; font-weight:400; font-style:italic; font-size:clamp(50px,8vw,90px); letter-spacing:-.03em; color:var(--brown-deep); line-height:.95; margin-bottom:10px; opacity:0; animation:fadeUp .7s ease .22s forwards; }
+  .subtitle { font-style:italic; font-size:17px; color:var(--brown-mid); opacity:0; animation:fadeUp .7s ease .36s forwards; }
+  .rule { width:48px; height:1px; background:var(--amber); margin:18px auto 0; opacity:0; animation:fadeUp .7s ease .46s forwards; }
+
+  /* Stats */
+  .stats-bar { display:flex; justify-content:center; gap:0; padding:0 24px; margin-bottom:28px; opacity:0; animation:fadeUp .7s ease .52s forwards; flex-wrap:wrap; }
+  .stat { padding:14px 28px; border:1px solid rgba(122,58,31,.2); border-right:none; background:rgba(255,252,242,.65); text-align:center; min-width:110px; }
+  .stat:first-child { border-radius:6px 0 0 6px; }
+  .stat:last-child  { border-right:1px solid rgba(122,58,31,.2); border-radius:0 6px 6px 0; }
+  .stat-val { font-family:'EB Garamond',serif; font-style:italic; font-size:26px; color:var(--brown-deep); line-height:1; }
+  .stat-lbl { font-size:9px; letter-spacing:.25em; text-transform:uppercase; color:var(--brown-mid); margin-top:3px; }
+
+  /* Map */
+  .map-wrap { max-width:1280px; margin:0 auto 44px; padding:0 20px; opacity:0; animation:fadeUp .8s ease .62s forwards; }
+  .map-frame { border:1px solid rgba(122,58,31,.28); border-radius:8px; overflow:hidden; box-shadow:0 1px 0 rgba(255,255,255,.6) inset, 0 6px 32px rgba(42,24,16,.08), 0 40px 80px -30px rgba(42,24,16,.13); background:var(--ocean); position:relative; }
+  #map-svg { width:100%; height:auto; display:block; }
+  .map-credit { position:absolute; bottom:10px; right:13px; font-family:'EB Garamond',serif; font-style:italic; font-size:11px; color:rgba(122,58,31,.45); pointer-events:none; }
+  #loading-msg { display:flex; align-items:center; justify-content:center; min-height:420px; font-style:italic; color:var(--brown-mid); font-size:16px; }
+
+  /* D3 styles */
+  .country { fill:#d6b97b; stroke:#7a5a2e; stroke-width:.35; stroke-linejoin:round; }
+  .country:hover { fill:#c5a660; }
+  .graticule { fill:none; stroke:rgba(122,58,31,.09); stroke-width:.4; }
+  .equator { fill:none; stroke:rgba(122,58,31,.28); stroke-width:.8; stroke-dasharray:5 5; }
+  .tropic { fill:none; stroke:rgba(122,58,31,.13); stroke-width:.5; stroke-dasharray:2 6; }
+  .coffee-belt { fill:rgba(200,146,58,.07); }
+  .borders { fill:none; stroke:#7a5a2e; stroke-width:.25; }
+
+  /* Pins */
+  .pin-group { cursor:pointer; }
+  .pin-ring { fill:#fdf6e4; stroke-width:1.5; transition:r .15s ease; }
+  .pin-group:hover .pin-ring { r:11; }
+  .pin-label { pointer-events:none; display:none; }
+  .pin-group:hover .pin-label { display:block; }
+  .pin-pulse { fill:none; stroke-width:1.5; opacity:0; }
+  .pin-group.active .pin-pulse { animation:pinPulse 2s ease-in-out infinite; }
+  @keyframes pinPulse { 0%,100%{r:12;opacity:.55} 50%{r:22;opacity:0} }
+
+  /* Cards */
+  .cards-section { max-width:1280px; margin:0 auto 56px; padding:0 20px; }
+  .section-title { font-family:'EB Garamond',serif; font-style:italic; font-size:34px; color:var(--brown-deep); }
+  .section-sub { font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--brown-mid); margin-top:2px; margin-bottom:20px; }
+  .cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(295px,1fr)); gap:12px; }
+  .card { background:rgba(255,252,242,.7); border:1px solid rgba(122,58,31,.18); border-radius:7px; padding:16px 18px; cursor:pointer; transition:transform .18s,box-shadow .18s,border-color .18s; position:relative; overflow:hidden; }
+  .card::after { content:''; position:absolute; inset:0; background:linear-gradient(135deg,rgba(200,146,58,.05) 0%,transparent 55%); pointer-events:none; }
+  .card:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(42,24,16,.09); border-color:rgba(122,58,31,.38); }
+  .card.active { border-color:var(--amber); box-shadow:0 0 0 2px rgba(200,146,58,.22),0 6px 20px rgba(42,24,16,.09); }
+  .card-shop { font-size:9px; letter-spacing:.32em; text-transform:uppercase; color:var(--brown-light); margin-bottom:4px; }
+  .card-name { font-family:'EB Garamond',serif; font-style:italic; font-size:21px; color:var(--brown-deep); line-height:1.15; margin-bottom:2px; }
+  .card-origin { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--brown-mid); margin-bottom:9px; }
+  .card-footer { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .card-notes { font-style:italic; font-size:14px; color:var(--brown); line-height:1.3; flex:1; }
+  .badge { background:var(--brown-mid); color:var(--cream); font-family:'EB Garamond',serif; font-style:italic; font-size:17px; padding:3px 10px; border-radius:20px; flex-shrink:0; }
+  .badge.high { background:var(--brown-deep); }
+
+  /* Modal */
+  .modal-bg { display:none; position:fixed; inset:0; background:rgba(42,24,16,.58); backdrop-filter:blur(5px); z-index:500; align-items:center; justify-content:center; padding:20px; }
+  .modal-bg.open { display:flex; animation:fadeIn .2s ease; }
+  .modal { background:linear-gradient(160deg,#fdf6e4 0%,#f0e4c4 100%); border:1px solid rgba(122,58,31,.4); border-radius:10px; max-width:590px; width:100%; max-height:88vh; overflow-y:auto; padding:38px 42px; position:relative; box-shadow:0 40px 100px -20px rgba(42,24,16,.48); animation:slideUp .22s ease; }
+  .modal-close { position:absolute; top:14px; right:14px; background:none; border:1px solid rgba(122,58,31,.3); border-radius:50%; width:30px; height:30px; cursor:pointer; color:var(--brown-mid); font-size:19px; display:flex; align-items:center; justify-content:center; transition:background .15s; }
+  .modal-close:hover { background:rgba(122,58,31,.1); }
+  .modal-shop { font-size:9px; letter-spacing:.35em; text-transform:uppercase; color:var(--brown-light); margin-bottom:5px; }
+  .modal-name { font-family:'EB Garamond',serif; font-style:italic; font-size:38px; font-weight:400; color:var(--brown-deep); line-height:1.05; margin-bottom:4px; }
+  .modal-origin { font-size:12px; letter-spacing:.15em; text-transform:uppercase; color:var(--brown-mid); margin-bottom:22px; }
+  .rating-box { display:flex; align-items:center; gap:18px; background:rgba(122,58,31,.055); border:1px solid rgba(122,58,31,.14); border-radius:7px; padding:14px 18px; margin-bottom:22px; }
+  .rating-big { font-family:'EB Garamond',serif; font-style:italic; font-size:46px; line-height:1; color:var(--brown-mid); }
+  .rating-label { font-size:9px; letter-spacing:.22em; text-transform:uppercase; color:var(--brown-light); margin-top:1px; }
+  .stars { display:flex; gap:3px; margin-bottom:4px; }
+  .star { width:14px; height:14px; }
+  .verdict { font-style:italic; font-size:13px; color:var(--brown); }
+  .field { margin-bottom:16px; }
+  .field-label { font-size:9px; letter-spacing:.28em; text-transform:uppercase; color:var(--brown-light); margin-bottom:4px; }
+  .field-value { font-size:17px; line-height:1.5; color:var(--brown-deep); }
+  .field-value.italic { font-style:italic; }
+  .field-value.small { font-size:15px; line-height:1.65; }
+  .divider { height:1px; background:linear-gradient(90deg,transparent,rgba(122,58,31,.18),transparent); margin:16px 0; }
+
+  .card-meta { margin-bottom: 8px; }
+  .process-tag {
+    display: inline-block;
+    font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase;
+    font-family: 'Crimson Pro', serif; font-weight: 400;
+    padding: 2px 8px; border-radius: 10px; border: 1px solid;
+  }
+  .process-natural    { color: #6b3d12; background: rgba(200,146,58,0.12); border-color: rgba(200,146,58,0.4); }
+  .process-washed     { color: #1a4a5e; background: rgba(100,175,210,0.12); border-color: rgba(100,175,210,0.4); }
+
+  footer { text-align:center; padding:20px 0 40px; font-size:10px; letter-spacing:.3em; text-transform:uppercase; color:rgba(74,46,30,.38); }
+
+  @keyframes fadeUp  { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes fadeIn  { from{opacity:0} to{opacity:1} }
+  @keyframes slideUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+
+  @media(max-width:600px) {
+    .stat{border:1px solid rgba(122,58,31,.2);border-radius:6px;flex:1 1 100px;margin:2px}
+    .modal{padding:26px 20px} .modal-name{font-size:28px}
+  }
+
+  /* ── Glossary ── */
+  .glossary-section {
+    background: linear-gradient(180deg, #efe4c8 0%, #e8d9b8 100%);
+    border-top: 1px solid rgba(122,58,31,.18);
+    padding: 60px 24px 64px;
+    margin-top: 0;
+  }
+  .glossary-inner { max-width: 1280px; margin: 0 auto; }
+  .glossary-eyebrow { font-size:10px; letter-spacing:.35em; text-transform:uppercase; color:var(--brown-light); margin-bottom:8px; }
+  .glossary-title { font-family:'EB Garamond',serif; font-style:italic; font-size:clamp(32px,5vw,52px); font-weight:400; color:var(--brown-deep); margin-bottom:14px; line-height:1; }
+  .glossary-intro { font-size:16px; color:var(--brown); max-width:680px; line-height:1.6; margin-bottom:40px; font-style:italic; }
+  .glossary-header { margin-bottom:36px; }
+
+  .glossary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .g-card {
+    background: rgba(255,252,242,.6);
+    border: 1px solid rgba(122,58,31,.16);
+    border-radius: 7px;
+    padding: 16px 18px 14px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .g-card-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .g-tag {
+    font-size:9px; letter-spacing:.22em; text-transform:uppercase;
+    padding:2px 8px; border-radius:10px; border:1px solid; flex-shrink:0;
+    font-family:'Crimson Pro',serif;
+  }
+  .g-natural  { color:#6b3d12; background:rgba(200,146,58,.14); border-color:rgba(200,146,58,.45); }
+  .g-washed   { color:#1a4a5e; background:rgba(100,175,210,.14); border-color:rgba(100,175,210,.45); }
+  .g-honey    { color:#7a4a10; background:rgba(220,170,60,.14); border-color:rgba(220,170,60,.45); }
+  .g-wethull  { color:#3d3010; background:rgba(160,130,60,.14); border-color:rgba(160,130,60,.45); }
+  .g-anaerobic{ color:#3d1060; background:rgba(140,80,200,.1); border-color:rgba(140,80,200,.35); }
+  .g-carbonic { color:#600030; background:rgba(180,40,80,.1); border-color:rgba(180,40,80,.35); }
+  .g-decaf    { color:#1a4a5e; background:rgba(80,160,180,.1); border-color:rgba(80,160,180,.35); }
+
+  .g-aka { font-size:10px; color:var(--brown-light); font-style:italic; }
+  .g-name { font-family:'EB Garamond',serif; font-style:italic; font-size:20px; color:var(--brown-deep); line-height:1.1; margin:0; }
+  .g-desc { font-size:13.5px; line-height:1.6; color:var(--brown); margin:0; flex:1; }
+  .g-flavour { font-size:12px; font-style:italic; color:var(--brown-mid); display:flex; align-items:center; gap:6px; }
+  .g-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; display:inline-block; }
+  .g-dot-amber  { background:#c8923a; }
+  .g-dot-blue   { background:#5a9abf; }
+  .g-dot-honey  { background:#d4a030; }
+  .g-dot-earth  { background:#8b6a30; }
+  .g-dot-purple { background:#9060c0; }
+  .g-dot-wine   { background:#8b2040; }
+  .g-meta { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-top:2px; }
+  .g-origin { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--brown-light); font-family:'Crimson Pro',serif; }
+  .g-yours { font-size:10px; color:var(--brown-mid); font-style:italic; background:rgba(122,58,31,.07); padding:1px 7px; border-radius:8px; }
+  .glossary-footnote { font-size:12px; font-style:italic; color:rgba(74,46,30,.55); text-align:center; max-width:700px; margin:0 auto; line-height:1.6; }
+
+  @media(max-width:600px) { .glossary-section{padding:40px 16px 48px} .glossary-grid{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<header>
+  <p class="eyebrow">☕ &nbsp; An Atlas of Tastings &nbsp; ☕</p>
+  <h1>☕ The Coffee Club</h1>
+  <p class="subtitle">Beans we've tasted, ranked, remembered</p>
+  <div class="rule"></div>
+</header>
+
+<div class="stats-bar">
+  <div class="stat"><div class="stat-val">8</div><div class="stat-lbl">Tastings</div></div>
+  <div class="stat"><div class="stat-val">4</div><div class="stat-lbl">Countries</div></div>
+  <div class="stat"><div class="stat-val" id="avg-val">—</div><div class="stat-lbl">Avg Score</div></div>
+  <div class="stat"><div class="stat-val" id="best-val" style="font-size:15px;line-height:1.2">—</div><div class="stat-lbl">Top Pick</div></div>
+</div>
+
+<div class="map-wrap">
+  <div class="map-frame" id="map-frame">
+    <div id="loading-msg">Loading map…</div>
+    <div class="map-credit">Mercator · Natural Earth · click a pin for details</div>
+  </div>
+</div>
+
+<div class="cards-section">
+  <div class="section-title">Tasting Log</div>
+  <div class="section-sub">· click any card to read the full note ·</div>
+  <div class="cards-grid" id="cards-grid"></div>
+</div>
+
+<!-- ══ GLOSSARY ══ -->
+<div class="glossary-section">
+  <div class="glossary-inner">
+    <div class="glossary-header">
+      <div class="glossary-eyebrow">· Reference ·</div>
+      <h2 class="glossary-title">A Field Guide to Processing</h2>
+      <p class="glossary-intro">How a coffee is processed — the removal of the cherry's fruit layers before drying — is one of the most decisive influences on what ends up in your cup. Here are all the methods in use around the world today.</p>
+    </div>
+    <div class="glossary-grid">
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-natural">Natural</span><span class="g-aka">Dry process · Sun-dried</span></div>
+        <h3 class="g-name">Natural</h3>
+        <p class="g-desc">The oldest method. Whole cherries are dried in the sun — on patios or raised beds — for 3–6 weeks, intact with skin, pulp and all. Sugars from the fruit slowly penetrate the bean during drying. Requires a dry climate and careful raking to avoid mould.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-amber"></span>Blueberry, strawberry, tropical fruit, wine, chocolate, low acidity</div>
+        <div class="g-meta"><span class="g-origin">Ethiopia · Brazil · Yemen</span><span class="g-yours">4 of your coffees</span></div>
+      </div>
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-washed">Washed</span><span class="g-aka">Wet process</span></div>
+        <h3 class="g-name">Washed</h3>
+        <p class="g-desc">The most widely used method worldwide. Cherry skin and pulp are removed mechanically within hours of harvest, then beans ferment in water for 12–72 hours to dissolve remaining mucilage, are rinsed clean, and dried on raised beds. The terroir of the bean itself, unobscured by fruit.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-blue"></span>Bright acidity, citrus, floral, clean finish, tea-like, light body</div>
+        <div class="g-meta"><span class="g-origin">Ethiopia · Colombia · Kenya · Central America</span><span class="g-yours">3 of your coffees</span></div>
+      </div>
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-honey">Honey</span><span class="g-aka">Pulped natural · Miel</span></div>
+        <h3 class="g-name">Honey</h3>
+        <p class="g-desc">A spectrum between washed and natural. The skin is removed but varying amounts of sticky mucilage (the "honey") are left on the bean during drying. Graded by colour — <strong>Yellow → Red → Black</strong> — each darker level means more mucilage retained, longer drying, and more fruit character.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-honey"></span>Caramel, stone fruit, syrupy sweetness, medium body, balanced acidity</div>
+        <div class="g-meta"><span class="g-origin">Costa Rica · El Salvador · Brazil</span></div>
+      </div>
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-wethull">Wet-Hulled</span><span class="g-aka">Giling Basah · Semi-washed</span></div>
+        <h3 class="g-name">Wet-Hulled</h3>
+        <p class="g-desc">Unique to Indonesia. The cherry is depulped while still very moist, then partially dried before the parchment layer is hulled off while the bean is still wet — the opposite sequence to washed processing. The exposed bean continues drying in humid air, producing a distinctively earthy cup.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-earth"></span>Earthy, tobacco, cedar, dark chocolate, heavy body, low acidity</div>
+        <div class="g-meta"><span class="g-origin">Sumatra · Sulawesi · Java</span></div>
+      </div>
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-anaerobic">Anaerobic</span><span class="g-aka">Oxygen-free fermentation</span></div>
+        <h3 class="g-name">Anaerobic</h3>
+        <p class="g-desc">Cherries or depulped beans are sealed in airtight tanks fitted with CO₂ valves. The absence of oxygen shifts fermentation chemistry dramatically, creating new flavour compounds. After 48–120+ hours the coffee finishes as washed or natural. Can layer on top of any base method.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-purple"></span>Intense tropical fruit, rum-like, spice, deep wine complexity</div>
+        <div class="g-meta"><span class="g-origin">Colombia · Costa Rica · Ethiopia · Global</span></div>
+      </div>
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-carbonic">Carbonic Mac.</span><span class="g-aka">CM · Wine-inspired</span></div>
+        <h3 class="g-name">Carbonic Maceration</h3>
+        <p class="g-desc">Borrowed from winemaking. Whole intact cherries are placed in tanks flooded with CO₂, triggering intracellular fermentation inside the fruit itself. Popularised in specialty coffee by 2015 World Barista Champion Sasa Sestic. Produces some of the most complex, wine-like coffees in existence.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-wine"></span>Red wine, dark cherry, lavender, intense aromatics, velvety texture</div>
+        <div class="g-meta"><span class="g-origin">Global — pioneered in Australia, Colombia, Ethiopia</span></div>
+      </div>
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-washed">Double Fermented</span><span class="g-aka">Kenya AA · Double-soak</span></div>
+        <h3 class="g-name">Double Fermented</h3>
+        <p class="g-desc">A washed variant that defines Kenyan specialty coffee. After the first fermentation and wash, beans are soaked again in fresh water for up to 72 hours. This second soak intensifies acidity and produces the electric brightness Kenyan coffees are famous for. Rarely used outside Kenya.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-blue"></span>Blackcurrant, tomato-like acidity, intensely juicy, bright</div>
+        <div class="g-meta"><span class="g-origin">Kenya (almost exclusively)</span></div>
+      </div>
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-decaf">Decaf</span><span class="g-aka">EA · Swiss Water · Mountain Water · CO₂</span></div>
+        <h3 class="g-name">Decaffeination</h3>
+        <p class="g-desc">Applied to green beans after harvest processing. <strong>EA (Sugarcane)</strong> — ethyl acetate from fermented sugarcane; preserves flavour best. <strong>Swiss Water</strong> — chemical-free water process; 99.9% caffeine removal. <strong>Mountain Water</strong> — glacial water from Mexico; similar to Swiss. <strong>CO₂</strong> — supercritical extraction; expensive but excellent quality retention.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-blue"></span>Flavour depends on base process — EA best preserves original character</div>
+        <div class="g-meta"><span class="g-origin">Colombia (EA) · Canada (Swiss) · Mexico (Mountain)</span><span class="g-yours">1 of your coffees</span></div>
+      </div>
+
+      <div class="g-card">
+        <div class="g-card-top"><span class="g-tag g-anaerobic">Experimental</span><span class="g-aka">Lactic · Yeast · Co-fermentation</span></div>
+        <h3 class="g-name">Experimental</h3>
+        <p class="g-desc"><strong>Lactic fermentation</strong> cultivates lactic acid bacteria in low-oxygen, low-water conditions for a yoghurt-like creaminess. <strong>Yeast inoculation</strong> adds selected yeast strains to guide flavour development. <strong>Co-fermentation</strong> adds fruit juices or spices (pineapple, cinnamon, etc.) to the tank. Divisive but increasingly present at Cup of Excellence competitions.</p>
+        <div class="g-flavour"><span class="g-dot g-dot-purple"></span>Highly variable — creamy, spiced, exotic; can be polarising</div>
+        <div class="g-meta"><span class="g-origin">Colombia · Ethiopia · Panama · Global</span></div>
+      </div>
+
+    </div>
+    <p class="glossary-footnote">Methods are not mutually exclusive — anaerobic fermentation can precede a washed or natural finish. Honey, decaf, and experimental techniques layer on top of base processes. New methods continue to emerge as producers push fermentation science further.</p>
+  </div>
+</div>
+
+<footer>✦ &nbsp; Add entries to the COFFEES array in source to expand the map &nbsp; ✦</footer>
+
+<div class="modal-bg" id="modal-bg" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeModal(null,true)">×</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<script>
+// ── DATA ──────────────────────────────────
+const COFFEES = [
+  { id:1, shop:"Another Coffee",    name:"Another Espresso",         origin:"Cerrado, Brazil",       bean:"Arabica (Red Catuaí)",         process:"Natural",           notes:"Hazelnut, chocolate, cashew nuts",                           info:"Produced by Gabriela Baracat Sanchez in Brazil's Cerrado region, a 4th-generation coffee producer. Sun-dried beans — smooth, aromatic and creamy. Grown at 1,000–1,200 m using exclusively regenerative farming methods.",                                                                                 rating:6.00, lat:-15.78, lon:-47.93 },
+  { id:2, shop:"CleverCoffee",      name:"La Catarata Natural",      origin:"Chirripó, Costa Rica",  bean:"Red Catuaí",                   process:"Natural",           notes:"Juicy red apples, dried apricots, fresh hazelnuts",          info:"Grown by the Ureña-Rojas family at Café Rivense del Chirripó, a farm founded in the 1940s and now run by Ricardo, his father Régulo, and brother Esteban. Natural processing — whole cherry dried intact — at 1,600 m.a.s.l.",           rating:7.00, lat: 9.49, lon:-83.49 },
+  { id:3, shop:"Elbgold",           name:"Denbi Uddo",               origin:"Guji, Ethiopia",        bean:"Arabica, Ethiopian Heirloom",  process:"Washed",            notes:"Peach, earl grey, caramel",                                  info:"Heirloom variety — a term for Ethiopia's many indigenous, genetically diverse varieties. Washed process: cherries pulped, fermented for 100 hours, then washed before drying. Expect a clean, bright, tea-like cup.",                    rating:6.00, lat: 5.95, lon: 38.55 },
+  { id:4, shop:"Vendiakaffe",       name:"Koffeinfri Kaffe (Decaf)", origin:"Huila, Colombia",       bean:"Arabica",                      process:"Washed · EA Decaf", notes:"Almonds, gentle sweetness, light fruity notes",              info:"Freshly roasted washed decaf from Huila (1,400–2,000 m a.s.l.), decaffeinated on-site using ethyl acetate to preserve flavor. Works beautifully for both filter and espresso.",                                                             rating:7.00, lat: 2.54, lon:-75.52 },
+  { id:5, shop:"CleverCoffee",      name:"El Desafío",               origin:"Chirripó, Costa Rica",  bean:"Arabica (Villa Sarchí)",       process:"Natural",           notes:"Sweet and creamy — strawberries, peach and papaya",         info:"Villa Sarchí variety — a natural Bourbon mutation local to Costa Rica. Natural (dry) process with cherries dried whole, fruit-on. The farm practices agroforestry, with coffee plants growing among diverse trees rather than monoculture.", rating:6.29, lat: 9.30, lon:-83.80 },
+  { id:6, shop:"CleverCoffee",      name:"Kayon Mountain",           origin:"East Guji, Ethiopia",   bean:"Arabica",                      process:"Natural",           notes:"Blueberry jam, ripe apricot, grey tea",                      info:"Owned by Ismael Hassen Aredo and family since 2012. 300 of 500 hectares dedicated to coffee under native acacia shade. Natural (fruit-on) processing — sun-dried on raised beds for up to 22 days. Strong local community investment.",  rating:6.71, lat: 5.55, lon: 39.10 },
+  { id:7, shop:"Coffee Collective", name:"Mulugeta Washed",          origin:"Sidama, Ethiopia",      bean:"Arabica",                      process:"Washed",            notes:"Elegant, clean — stone fruit, citrus blossom, bergamot",    info:"Washed (wet) processing removes fruit influence, highlighting the bean's intrinsic character. Cherries sorted by hand, fermented ~24 hours, washed, then dried on raised African beds. Expect brightness and clarity, not fruit-bomb sweetness.", rating:7.22, lat: 6.75, lon: 38.30 },
+  { id:8, shop:"Bean Bros",         name:"Las Brisas Pink Bourbon",  origin:"Huila, Colombia",       bean:"Arabica (Pink Bourbon)",       process:"Washed",            notes:"TBD — add your tasting notes",                              info:"Grown by Brayan Smith on Finca Las Brisas in Pitalito, Huila, at high altitude. Pink Bourbon — also called Variedad Rosado — is prized for its natural sweetness, vibrant acidity, and floral complexity. Cherries are hand-sorted and floated before washed processing. Sourced via Cofinet, a specialist Colombian green coffee exporter.", rating:0, lat: 1.85, lon:-76.05 },
+];
+
+// ── STATS ─────────────────────────────────
+const avg  = COFFEES.reduce((s,c)=>s+c.rating,0)/COFFEES.length;
+const best = COFFEES.reduce((a,b)=>a.rating>b.rating?a:b);
+document.getElementById('avg-val').textContent  = avg.toFixed(2)+' / 10';
+document.getElementById('best-val').textContent = best.name;
+
+// ── CARDS ─────────────────────────────────
+const grid = document.getElementById('cards-grid');
+COFFEES.forEach(c=>{
+  const d = document.createElement('div');
+  d.className='card'; d.dataset.id=c.id;
+  d.innerHTML=`<div class="card-shop">${c.shop}</div>
+    <div class="card-name">${c.name}</div>
+    <div class="card-origin">${c.origin}</div>
+    <div class="card-meta"><span class="process-tag process-${c.process.split(' ')[0].toLowerCase()}">${c.process}</span></div>
+    <div class="card-footer">
+      <div class="card-notes">${c.notes}</div>
+      <div class="badge ${c.rating>=7?'high':''}">${c.rating.toFixed(2)}</div>
+    </div>`;
+  d.addEventListener('click',()=>openModal(c.id));
+  grid.appendChild(d);
+});
+
+// ── COLOUR ────────────────────────────────
+const pinColor = r => r>=7?'#5c2510': r>=6.5?'#8b3a1a':'#b06030';
+
+// ── D3 MAP ────────────────────────────────
+const frame = document.getElementById('map-frame');
+const W = Math.max(frame.clientWidth || 900, 600);
+const H = Math.round(W * 0.58);
+
+// Remove loading div and insert SVG
+document.getElementById('loading-msg').remove();
+const svg = d3.select('#map-frame')
+  .insert('svg','div')
+  .attr('id','map-svg')
+  .attr('viewBox',`0 0 ${W} ${H}`)
+  .attr('preserveAspectRatio','xMidYMid meet');
+
+// Mercator projection
+const proj = d3.geoMercator()
+  .scale(W / (2.1 * Math.PI))
+  .translate([W/2, H/2 + H*0.06])
+  .center([10, 12]);
+
+const pathGen = d3.geoPath().projection(proj);
+
+// Ocean
+svg.append('rect').attr('width',W).attr('height',H).attr('fill','#cfe3e6');
+
+// Graticule
+svg.append('path')
+  .datum(d3.geoGraticule().step([20,20])())
+  .attr('class','graticule')
+  .attr('d',pathGen);
+
+// Coffee belt rectangle (between tropics of Cancer and Capricorn)
+const beltFeature = {type:'Feature',geometry:{type:'Polygon',coordinates:[[
+  [-180,-23.5],[-180,23.5],[180,23.5],[180,-23.5],[-180,-23.5]
+]]}};
+svg.append('path').datum(beltFeature).attr('class','coffee-belt').attr('d',pathGen);
+
+// Tropic lines
+[-23.5,23.5].forEach(lat=>{
+  svg.append('path').datum({type:'Feature',geometry:{type:'LineString',coordinates:[[-180,lat],[180,lat]]}})
+    .attr('class','tropic').attr('d',pathGen);
+});
+// Equator
+svg.append('path').datum({type:'Feature',geometry:{type:'LineString',coordinates:[[-180,0],[180,0]]}})
+  .attr('class','equator').attr('d',pathGen);
+
+// Load world topology
+fetch('https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json')
+  .then(r=>r.json())
+  .then(world=>{
+    const countries = topojson.feature(world, world.objects.countries);
+
+    svg.append('g').selectAll('path')
+      .data(countries.features)
+      .join('path')
+      .attr('class','country')
+      .attr('d',pathGen);
+
+    svg.append('path')
+      .datum(topojson.mesh(world, world.objects.countries,(a,b)=>a!==b))
+      .attr('class','borders')
+      .attr('d',pathGen);
+  })
+  .catch(e=>console.warn('Map data unavailable:',e))
+  .finally(()=>drawPins());
+
+// Draw pins
+function drawPins(){
+  const pinsG = svg.append('g').attr('id','pins');
+  COFFEES.forEach(c=>{
+    const [px,py] = proj([c.lon,c.lat]);
+    const col = pinColor(c.rating);
+    const lw = c.name.length * 5.5 + 18;
+
+    const g = pinsG.append('g')
+      .attr('class','pin-group')
+      .attr('transform',`translate(${px},${py})`)
+      .attr('data-id',c.id);
+
+    g.append('circle').attr('class','pin-pulse').attr('r',12).attr('stroke',col);
+    g.append('circle').attr('class','pin-ring').attr('r',9).attr('stroke',col);
+    g.append('circle').attr('r',5).attr('fill',col);
+    g.append('path')
+      .attr('fill','none').attr('stroke','rgba(255,248,230,0.6)').attr('stroke-width',.55)
+      .attr('d','M0,-3.5 Q2.8,-1.8 2.8,0 Q2.8,1.8 0,3.5 Q-2.8,1.8 -2.8,0 Q-2.8,-1.8 0,-3.5Z M0,-3.5 L0,3.5');
+
+    const lbl = g.append('g').attr('class','pin-label').attr('transform','translate(11,-10)');
+    lbl.append('rect').attr('width',lw).attr('height',18).attr('rx',3).attr('fill','rgba(42,24,16,0.92)');
+    lbl.append('text').attr('x',8).attr('y',12.5)
+      .attr('fill','#f5ead5').attr('font-size',10)
+      .attr('font-family','Crimson Pro, Georgia, serif').attr('font-style','italic')
+      .text(c.name);
+
+    g.on('click',()=>openModal(c.id));
+  });
+}
+
+// ── MODAL ─────────────────────────────────
+function starsHTML(r){
+  const s=r/2; let h='<div class="stars">';
+  for(let i=1;i<=5;i++){
+    const full=s>=i, half=!full&&s>=i-0.5;
+    h+=`<svg class="star" viewBox="0 0 24 24">
+      <path d="M12 2l2.6 6.6 7 .6-5.3 4.7 1.7 6.9L12 17.1l-6 3.7 1.7-6.9L2.4 9.2l7-.6Z"
+        fill="${full?'#c8923a':'rgba(74,46,30,.15)'}" stroke="#7a3a1f" stroke-width="1"/>
+      ${half?`<path d="M12 2l2.6 6.6 7 .6-5.3 4.7 1.7 6.9L12 17.1l-6 3.7 1.7-6.9L2.4 9.2l7-.6Z" fill="#c8923a" style="clip-path:inset(0 50% 0 0)" stroke="none"/>`:''}
+    </svg>`;
+  }
+  return h+'</div>';
+}
+
+function openModal(id){
+  const c=COFFEES.find(x=>x.id===id); if(!c) return;
+  const v=c.rating>=7?'A standout — a coffee to revisit.':c.rating>=6.5?'Solid and characterful.':'Pleasant; not extraordinary.';
+  document.getElementById('modal-content').innerHTML=`
+    <div class="modal-shop">${c.shop}</div>
+    <div class="modal-name">${c.name}</div>
+    <div class="modal-origin">${c.origin}</div>
+    <div class="rating-box">
+      <div><div class="rating-big">${c.rating.toFixed(2)}</div><div class="rating-label">out of 10</div></div>
+      <div>${starsHTML(c.rating)}<div class="verdict">${v}</div></div>
+    </div>
+    <div class="field"><div class="field-label">Processing</div><div class="field-value"><span class="process-tag process-${c.process.split(' ')[0].toLowerCase()}">${c.process}</span></div></div>
+    <div class="divider"></div>
+    <div class="field"><div class="field-label">Bean</div><div class="field-value">${c.bean}</div></div>
+    <div class="divider"></div>
+    <div class="field"><div class="field-label">Flavour notes</div><div class="field-value italic">${c.notes}</div></div>
+    <div class="divider"></div>
+    <div class="field"><div class="field-label">The story</div><div class="field-value small">${c.info}</div></div>`;
+
+  document.querySelectorAll('.pin-group').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.card').forEach(p=>p.classList.remove('active'));
+  const pin  = document.querySelector(`.pin-group[data-id="${id}"]`);
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  if(pin)  pin.classList.add('active');
+  if(card){ card.classList.add('active'); card.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+  document.getElementById('modal-bg').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+
+function closeModal(e,force){
+  if(force||(e&&e.target===document.getElementById('modal-bg'))){
+    document.getElementById('modal-bg').classList.remove('open');
+    document.body.style.overflow='';
+    document.querySelectorAll('.pin-group,.card').forEach(p=>p.classList.remove('active'));
+  }
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(null,true); });
+</script>
+</body>
+</html>
